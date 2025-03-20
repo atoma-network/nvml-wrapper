@@ -959,7 +959,12 @@ impl<'nvml> Device<'nvml> {
     */
     #[doc(alias = "nvmlDeviceGetConfComputeGpusReadyState")]
     pub fn get_confidential_compute_state(&self) -> Result<bool, NvmlError> {
-        let sym = nvml_sym(self.nvml.lib.nvmlSystemGetConfComputeGpusReadyState.as_ref())?;
+        let sym = nvml_sym(
+            self.nvml
+                .lib
+                .nvmlSystemGetConfComputeGpusReadyState
+                .as_ref(),
+        )?;
 
         unsafe {
             let mut is_accepting_work: u32 = 0;
@@ -967,7 +972,6 @@ impl<'nvml> Device<'nvml> {
             Ok(is_accepting_work == NVML_CC_ACCEPTING_CLIENT_REQUESTS_TRUE)
         }
     }
-    
 
     /**
     Sets the confidential compute state for this `Device`.
@@ -978,7 +982,12 @@ impl<'nvml> Device<'nvml> {
     */
     #[doc(alias = "nvmlDeviceSetConfComputeState")]
     pub fn set_confidential_compute_state(&self, is_accepting_work: bool) -> Result<(), NvmlError> {
-        let sym = nvml_sym(self.nvml.lib.nvmlSystemSetConfComputeGpusReadyState.as_ref())?;
+        let sym = nvml_sym(
+            self.nvml
+                .lib
+                .nvmlSystemSetConfComputeGpusReadyState
+                .as_ref(),
+        )?;
 
         unsafe {
             nvml_try(sym(is_accepting_work as u32))?;
