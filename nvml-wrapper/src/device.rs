@@ -951,6 +951,42 @@ impl<'nvml> Device<'nvml> {
     }
 
     /**
+    Gets the confidential compute state for this `Device`.
+    # Errors
+    * `Uninitialized`, if the library has not been successfully initialized
+    * `InvalidArg`, if device is invalid or memory is NULL
+    * `NotSupported`, if this query is not supported by the device
+    */
+    #[doc(alias = "nvmlDeviceGetConfComputeGpusReadyState")]
+    pub fn get_confidential_compute_state(&self) -> Result<bool, NvmlError> {
+        let sym = nvml_sym(self.nvml.lib.nvmlSystemGetConfComputeGpusReadyState.as_ref())?;
+
+        unsafe {
+            let mut is_accepting_work: u32 = 0;
+            nvml_try(sym(&mut is_accepting_work))?;
+            Ok(is_accepting_work == NVML_CC_ACCEPTING_CLIENT_REQUESTS_TRUE)
+        }
+    }
+    
+
+    /**
+    Sets the confidential compute state for this `Device`.
+    # Errors
+    * `Uninitialized`, if the library has not been successfully initialized
+    * `InvalidArg`, if device is invalid or memory is NULL
+    * `NotSupported`, if this query is not supported by the device
+    */
+    #[doc(alias = "nvmlDeviceSetConfComputeState")]
+    pub fn set_confidential_compute_state(&self, is_accepting_work: bool) -> Result<(), NvmlError> {
+        let sym = nvml_sym(self.nvml.lib.nvmlSystemSetConfComputeGpusReadyState.as_ref())?;
+
+        unsafe {
+            nvml_try(sym(is_accepting_work as u32))?;
+            Ok(())
+        }
+    }
+
+    /**
     Gets the current utilization and sampling size (sampling size in μs) for the Decoder.
 
     # Errors
