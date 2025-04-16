@@ -290,6 +290,10 @@ impl From<nvmlEccErrorCounts_t> for EccErrorCounts {
 pub struct MemoryInfo {
     /// Unallocated FB memory.
     pub free: u64,
+
+    /// Reserved FB memory.
+    pub reserved: u64,
+
     /// Total installed FB memory.
     pub total: u64,
     /// Allocated FB memory.
@@ -297,14 +301,19 @@ pub struct MemoryInfo {
     /// Note that the driver/GPU always sets aside a small amount of memory for
     /// bookkeeping.
     pub used: u64,
+
+    /// Struct version, must be set according to API specification before calling the API.
+    pub version: u32,
 }
 
-impl From<nvmlMemory_t> for MemoryInfo {
-    fn from(struct_: nvmlMemory_t) -> Self {
+impl From<nvmlMemory_v2_t> for MemoryInfo {
+    fn from(struct_: nvmlMemory_v2_t) -> Self {
         Self {
             free: struct_.free,
+            reserved: struct_.reserved,
             total: struct_.total,
             used: struct_.used,
+            version: struct_.version,
         }
     }
 }
@@ -653,6 +662,68 @@ impl TryFrom<nvmlFBCSessionInfo_t> for FbcSessionInfo {
             average_fps: value.averageFPS,
             average_latency: value.averageLatency,
         })
+    }
+}
+
+/// Hardware level attributes from a GPU device
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct DeviceAttributes {
+    /// Streaming MultiProcessor Count
+    pub multiprocessor_count: u32,
+    /// Shared Copy Engine Count
+    pub shared_copy_engine_count: u32,
+    /// Shared Decoder Count
+    pub shared_decoder_count: u32,
+    /// Shared Encoder Count
+    pub shared_encoder_count: u32,
+    /// Shared JPEG Count
+    pub shared_jpeg_count: u32,
+    /// Shared OFA Count
+    pub shared_ofa_count: u32,
+    /// GPU instance slice Count
+    pub gpu_instance_slice_count: u32,
+    /// Compute Instance slice count
+    pub compute_instance_slice_count: u32,
+    /// Device memory size in MB
+    pub memory_size_mb: u64,
+}
+
+impl From<nvmlDeviceAttributes_t> for DeviceAttributes {
+    fn from(struct_: nvmlDeviceAttributes_t) -> Self {
+        Self {
+            multiprocessor_count: struct_.multiprocessorCount,
+            shared_copy_engine_count: struct_.sharedCopyEngineCount,
+            shared_decoder_count: struct_.sharedDecoderCount,
+            shared_encoder_count: struct_.sharedEncoderCount,
+            shared_jpeg_count: struct_.sharedJpegCount,
+            shared_ofa_count: struct_.sharedOfaCount,
+            gpu_instance_slice_count: struct_.gpuInstanceSliceCount,
+            compute_instance_slice_count: struct_.computeInstanceSliceCount,
+            memory_size_mb: struct_.memorySizeMB,
+        }
+    }
+}
+
+/// Fan speed info
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct FanSpeedInfo {
+    /// The API version number
+    pub version: u32,
+    /// The fan index
+    pub fan: u32,
+    /// OUT: the fan speed in RPM.
+    pub speed: u32,
+}
+
+impl From<nvmlFanSpeedInfo_t> for FanSpeedInfo {
+    fn from(struct_: nvmlFanSpeedInfo_t) -> Self {
+        Self {
+            version: struct_.version,
+            fan: struct_.fan,
+            speed: struct_.speed,
+        }
     }
 }
 
