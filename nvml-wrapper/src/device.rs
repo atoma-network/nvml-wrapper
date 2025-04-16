@@ -836,6 +836,24 @@ impl<'nvml> Device<'nvml> {
     }
 
     /**
+    Gets the confidential compute state for this `Device`.
+    # Errors
+    * `Uninitialized`, if the library has not been successfully initialized
+    * `InvalidArg`, if device is invalid or memory is NULL
+    * `NotSupported`, if this query is not supported by the device
+    */
+    #[doc(alias = "nvmlSystemGetConfComputeSettings")]
+    pub fn is_ppcie_enabled(&self) -> Result<bool, NvmlError> {
+        let sym = nvml_sym(self.nvml.lib.nvmlSystemGetConfComputeSettings.as_ref())?;
+
+        unsafe {
+            let mut settings: nvmlSystemConfComputeSettings_t = mem::zeroed();
+            nvml_try(sym(&mut settings))?;
+            Ok(settings.multiGpuMode == NVML_CC_SYSTEM_MULTIGPU_PROTECTED_PCIE)
+        }
+    }
+
+    /**
     Gets the confidential compute capabilities for this `Device`.
     # Errors
     * `Uninitialized`, if the library has not been successfully initialized
