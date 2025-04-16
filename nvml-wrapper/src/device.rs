@@ -11,11 +11,10 @@ use crate::bitmasks::Behavior;
 
 use crate::enum_wrappers::{bool_from_state, device::*, state_from_bool};
 
-use crate::enums::device::BusType;
-use crate::enums::device::DeviceArchitecture;
-use crate::enums::device::GpuLockedClocksSetting;
-use crate::enums::device::PcieLinkMaxSpeed;
-use crate::enums::device::PowerSource;
+use crate::enums::device::{
+    BusType, DeviceArchitecture, FanControlPolicy, GpuLockedClocksSetting, PcieLinkMaxSpeed,
+    PowerSource,
+};
 #[cfg(target_os = "linux")]
 use crate::error::NvmlErrorWithSource;
 use crate::error::{nvml_sym, nvml_try, Bits, NvmlError};
@@ -73,8 +72,8 @@ pub struct Device<'nvml> {
     nvml: &'nvml Nvml,
 }
 
-unsafe impl<'nvml> Send for Device<'nvml> {}
-unsafe impl<'nvml> Sync for Device<'nvml> {}
+unsafe impl Send for Device<'_> {}
+unsafe impl Sync for Device<'_> {}
 
 assert_impl_all!(Device: Send, Sync);
 
@@ -155,10 +154,10 @@ impl<'nvml> Device<'nvml> {
 
     * `Uninitialized`, if the library has not been successfully initialized
     * `InvalidArg`, if this `Device` is invalid or the apiType is invalid (may occur if
-    the C lib changes dramatically?)
+    * the C lib changes dramatically?)
     * `NotSupported`, if this query is not supported by this `Device` or this `Device`
-    does not support the feature that is being queried (e.g. enabling/disabling auto
-    boosted clocks is not supported by this `Device`).
+    * does not support the feature that is being queried (e.g. enabling/disabling auto
+    * boosted clocks is not supported by this `Device`).
     * `GpuLost`, if this `Device` has fallen off the bus or is otherwise inaccessible
     * `UnexpectedVariant`, for which you can read the docs for
     * `Unknown`, on any unexpected error
@@ -192,7 +191,7 @@ impl<'nvml> Device<'nvml> {
 
     * `Uninitialized`, if the library has not been successfully initialized
     * `InvalidArg`, if this `Device` is invalid or the clockType is invalid (may occur
-    if the C lib changes dramatically?)
+    * if the C lib changes dramatically?)
     * `NotSupported`, if this `Device` does not support this feature
     * `GpuLost`, if this `Device` has fallen off the bus or is otherwise inaccessible
     * `Unknown`, on any unexpected error
@@ -432,7 +431,7 @@ impl<'nvml> Device<'nvml> {
     * `Uninitialized`, if the library has not been successfully initialized
     * `InvalidArg`, if this `Device` is invalid or `clock_type` is invalid (shouldn't occur?)
     * `NotSupported`, if this `Device` or the `clock_type` on this `Device`
-    does not support this feature
+    * does not support this feature
     * `GpuLost`, if this `Device` has fallen off the bus or is otherwise inaccessible
     * `Unknown`, on any unexpected error
 
@@ -740,6 +739,88 @@ impl<'nvml> Device<'nvml> {
             nvml_try(sym(self.device, size as c_uint, affinities.as_mut_ptr()))?;
 
             Ok(affinities)
+        }
+    }
+
+    /**
+    Fetches the confidential compute attestation report for this [`Device`].
+
+    This method retrieves a comprehensive attestation report from the device, which includes:
+    - A 32-byte nonce
+    - The attestation report size (as big-endian bytes)
+    - The attestation report data (up to 8192 bytes)
+    - A flag indicating if CEC attestation is present (as big-endian bytes)
+    - The CEC attestation report size (as big-endian bytes)
+    - The CEC attestation report data (up to 4096 bytes)
+
+    The returned vector contains all these components concatenated together in the order listed above.
+
+    # Errors
+
+    * `Uninitialized`, if the library has not been successfully initialized
+    * `InvalidArg`, if device is invalid or memory is NULL
+    * `NotSupported`, if this query is not supported by the device
+    * `Unknown`, on any unexpected error
+    */
+    #[doc(alias = "nvmlDeviceGetAttestationReport")]
+    pub fn confidential_compute_gpu_attestation_report(
+        &self,
+        nonce: [u8; NVML_CC_GPU_CEC_NONCE_SIZE as usize],
+    ) -> Result<ConfidentialComputeGpuAttestationReport, NvmlError> {
+        let sym = nvml_sym(
+            self.nvml
+                .lib
+                .nvmlDeviceGetConfComputeGpuAttestationReport
+                .as_ref(),
+        )?;
+
+        unsafe {
+            let mut report: nvmlConfComputeGpuAttestationReport_st = mem::zeroed();
+            report.nonce = nonce;
+
+            nvml_try(sym(self.device, &mut report))?;
+
+            let is_cec_attestation_report_present = report.isCecAttestationReportPresent == 1;
+            Ok(ConfidentialComputeGpuAttestationReport {
+                attestation_report_size: report.attestationReportSize,
+                attestation_report: report.attestationReport.to_vec(),
+                is_cec_attestation_report_present,
+                cec_attestation_report_size: report.cecAttestationReportSize,
+                cec_attestation_report: report.cecAttestationReport.to_vec(),
+            })
+        }
+    }
+
+    /**
+    Gets the confidential compute GPU certificate for this `Device`.
+
+    # Errors
+
+    * `Uninitialized` if the library has not been successfully initialized
+    * `InvalidArg` if device is invalid or memory is NULL
+    * `NotSupported` if this query is not supported by the device
+    * `Unknown` on any unexpected error
+    */
+    pub fn confidential_compute_gpu_certificate(
+        &self,
+    ) -> Result<ConfidentialComputeGpuCertificate, NvmlError> {
+        let sym = nvml_sym(
+            self.nvml
+                .lib
+                .nvmlDeviceGetConfComputeGpuCertificate
+                .as_ref(),
+        )?;
+
+        unsafe {
+            let mut certificate_chain: nvmlConfComputeGpuCertificate_t = mem::zeroed();
+            nvml_try(sym(self.device, &mut certificate_chain))?;
+
+            Ok(ConfidentialComputeGpuCertificate {
+                cert_chain_size: certificate_chain.certChainSize,
+                attestation_cert_chain_size: certificate_chain.attestationCertChainSize,
+                cert_chain: certificate_chain.certChain.to_vec(),
+                attestation_cert_chain: certificate_chain.attestationCertChain.to_vec(),
+            })
         }
     }
 
@@ -1129,6 +1210,31 @@ impl<'nvml> Device<'nvml> {
     }
 
     /**
+    Gets GPU device hardware attributes
+
+    DeviceAttributes represents compute capabilities, Streaming MultiProcessor
+    capacity, slices allocated to a given GPU, decoding/encoding supported,
+    available memory for these GPU operations
+
+    # Errors
+    * `Uninitialized`, if the library has not been successfully initialized
+    * `InvalidArg`, if this `Device` is invalid
+    * `GpuLost`, if this `Device` has fallen off the bus or is otherwise inaccessible
+    * `Unknown`, on any unexpected error
+    */
+    #[doc(alias = "nvmlDeviceGetAttributes_v2")]
+    pub fn attributes(&self) -> Result<DeviceAttributes, NvmlError> {
+        let sym = nvml_sym(self.nvml.lib.nvmlDeviceGetAttributes_v2.as_ref())?;
+
+        unsafe {
+            let mut attrs: nvmlDeviceAttributes_t = mem::zeroed();
+            nvml_try(sym(self.device, &mut attrs))?;
+
+            Ok(attrs.into())
+        }
+    }
+
+    /**
     Gets the default applications clock that this `Device` boots with or defaults to after
     `reset_applications_clocks()`.
 
@@ -1438,7 +1544,7 @@ impl<'nvml> Device<'nvml> {
     * `Uninitialized`, if the library has not been successfully initialized
     * `GpuLost`, if this `Device` has fallen off the bus or is otherwise inaccessible
     * `UnexpectedVariant`, if an enum variant not defined in this wrapper gets
-    returned in a field of an `EncoderSessionInfo` struct
+    * returned in a field of an `EncoderSessionInfo` struct
     * `Unknown`, on any unexpected error
 
     # Device Support
@@ -1525,6 +1631,116 @@ impl<'nvml> Device<'nvml> {
     }
 
     /**
+    Gets the GPU clock frequency offset value.
+
+    # Errors
+
+    * `Uninitialized`, if the library has not been successfully initialized
+    * `InvalidArg`, if this `Device` is invalid
+    * `NotSupported`, if this `Device` does not support this feature
+    * `GpuLost`, if this `Device` has fallen off the bus or is otherwise inaccessible
+    * `UnexpectedVariant`, for which you can read the docs for
+    * `Unknown`, on any unexpected error
+
+    # Device Support
+
+    Supports all discrete products with unlocked overclocking capabilities.
+    */
+    // Checked against local
+    // Tested (no-run)
+    #[doc(alias = "nvmlDeviceGetGpcClkVfOffset")]
+    pub fn gpc_clock_vf_offset(&self) -> Result<i32, NvmlError> {
+        let sym = nvml_sym(self.nvml.lib.nvmlDeviceGetGpcClkVfOffset.as_ref())?;
+
+        unsafe {
+            let mut offset: c_int = mem::zeroed();
+            nvml_try(sym(self.device, &mut offset))?;
+
+            Ok(offset)
+        }
+    }
+
+    /**
+    Sets the GPU clock frequency offset value.
+
+    # Errors
+
+    * `Uninitialized`, if the library has not been successfully initialized
+    * `InvalidArg`, if this `Device` is invalid
+    * `NotSupported`, if this `Device` does not support this feature
+    * `GpuLost`, if this `Device` has fallen off the bus or is otherwise inaccessible
+    * `UnexpectedVariant`, for which you can read the docs for
+    * `Unknown`, on any unexpected error
+
+    # Device Support
+
+    Supports all discrete products with unlocked overclocking capabilities.
+    */
+    // Checked against local
+    // Tested (no-run)
+    #[doc(alias = "nvmlDeviceGetGpcClkVfOffset")]
+    pub fn set_gpc_clock_vf_offset(&self, offset: i32) -> Result<(), NvmlError> {
+        let sym = nvml_sym(self.nvml.lib.nvmlDeviceSetGpcClkVfOffset.as_ref())?;
+
+        unsafe { nvml_try(sym(self.device, offset)) }
+    }
+
+    /**
+    Gets the memory clock frequency offset value.
+
+    # Errors
+
+    * `Uninitialized`, if the library has not been successfully initialized
+    * `InvalidArg`, if this `Device` is invalid
+    * `NotSupported`, if this `Device` does not support this feature
+    * `GpuLost`, if this `Device` has fallen off the bus or is otherwise inaccessible
+    * `UnexpectedVariant`, for which you can read the docs for
+    * `Unknown`, on any unexpected error
+
+    # Device Support
+
+    Supports all discrete products with unlocked overclocking capabilities.
+    */
+    // Checked against local
+    // Tested (no-run)
+    #[doc(alias = "nvmlDeviceGetGpcMemClkVfOffset")]
+    pub fn mem_clock_vf_offset(&self) -> Result<i32, NvmlError> {
+        let sym = nvml_sym(self.nvml.lib.nvmlDeviceGetMemClkVfOffset.as_ref())?;
+
+        unsafe {
+            let mut offset: c_int = mem::zeroed();
+            nvml_try(sym(self.device, &mut offset))?;
+
+            Ok(offset)
+        }
+    }
+
+    /**
+    Sets the memory clock frequency offset value.
+
+    # Errors
+
+    * `Uninitialized`, if the library has not been successfully initialized
+    * `InvalidArg`, if this `Device` is invalid
+    * `NotSupported`, if this `Device` does not support this feature
+    * `GpuLost`, if this `Device` has fallen off the bus or is otherwise inaccessible
+    * `UnexpectedVariant`, for which you can read the docs for
+    * `Unknown`, on any unexpected error
+
+    # Device Support
+
+    Supports all discrete products with unlocked overclocking capabilities.
+    */
+    // Checked against local
+    // Tested (no-run)
+    #[doc(alias = "nvmlDeviceSetGpcMemClkVfOffset")]
+    pub fn set_mem_clock_vf_offset(&self, offset: i32) -> Result<(), NvmlError> {
+        let sym = nvml_sym(self.nvml.lib.nvmlDeviceSetMemClkVfOffset.as_ref())?;
+
+        unsafe { nvml_try(sym(self.device, offset)) }
+    }
+
+    /**
     Gets the intended operating speed of the specified fan as a percentage of the
     maximum fan speed (100%).
 
@@ -1557,6 +1773,131 @@ impl<'nvml> Device<'nvml> {
 
             Ok(speed)
         }
+    }
+
+    /**
+    Retrieves the intended operating speed in rotations per minute (RPM) of the
+    device's specified fan.
+
+    Note: The reported speed is the intended fan speed. If the fan is physically
+    blocked and unable to spin, the output will not match the actual fan speed.
+
+    ...
+    You can determine valid fan indices using [`Self::num_fans()`].
+
+    # Errors
+
+    * `Uninitialized`, if the library has not been successfully initialized
+    * `InvalidArg`, if this `Device` is invalid or `fan_idx` is invalid
+    * `NotSupported`, if this `Device` does not have a fan or is newer than Maxwell
+    * `GpuLost`, if this `Device` has fallen off the bus or is otherwise inaccessible
+    * `Unknown`, on any unexpected error
+
+    # Device Support
+
+    For Maxwell or newer fully supported devices.
+
+    For all discrete products with dedicated fans.
+    */
+    // Checked against local
+    // Tested
+    #[doc(alias = "nvmlDeviceGetFanSpeedRPM")]
+    pub fn fan_speed_rpm(&self, fan_idx: u32) -> Result<u32, NvmlError> {
+        let sym = nvml_sym(self.nvml.lib.nvmlDeviceGetFanSpeedRPM.as_ref())?;
+
+        unsafe {
+            let mut fan_speed: nvmlFanSpeedInfo_t = mem::zeroed();
+            // Implements NVML_STRUCT_VERSION(FanSpeedInfo, 1), as detailed in nvml.h
+            fan_speed.version =
+                (std::mem::size_of::<nvmlFanSpeedInfo_v1_t>() | (1_usize << 24_usize)) as u32;
+            fan_speed.fan = fan_idx;
+            nvml_try(sym(self.device, &mut fan_speed))?;
+
+            Ok(fan_speed.speed)
+        }
+    }
+
+    /**
+    Gets current fan control policy.
+
+    You can determine valid fan indices using [`Self::num_fans()`].
+
+    # Errors
+
+    * `Uninitialized`, if the library has not been successfully initialized
+    * `InvalidArg`, if this `Device` is invalid or `fan_idx` is invalid
+    * `NotSupported`, if this `Device` does not have a fan
+    * `GpuLost`, if this `Device` has fallen off the bus or is otherwise inaccessible
+    * `UnexpectedVariant`, for which you can read the docs for
+    * `Unknown`, on any unexpected error
+
+    # Device Support
+
+    Supports Maxwell or newer fully supported discrete devices with fans.
+     */
+    #[doc(alias = "nvmlGetFanControlPolicy_v2")]
+    pub fn fan_control_policy(&self, fan_idx: u32) -> Result<FanControlPolicy, NvmlError> {
+        let sym = nvml_sym(self.nvml.lib.nvmlDeviceGetFanControlPolicy_v2.as_ref())?;
+
+        unsafe {
+            let mut policy: nvmlFanControlPolicy_t = mem::zeroed();
+            nvml_try(sym(self.device, fan_idx, &mut policy))?;
+
+            FanControlPolicy::try_from(policy)
+        }
+    }
+
+    /**
+    Sets the speed of a specified fan.
+
+    WARNING: This function changes the fan control policy to manual. It means that YOU have to monitor the temperature and adjust the fan speed accordingly.
+    If you set the fan speed too low you can burn your GPU! Use [`Device::set_default_fan_speed`] to restore default control policy.
+
+    You can determine valid fan indices using [`Self::num_fans()`].
+
+    # Errors
+
+    * `Uninitialized`, if the library has not been successfully initialized
+    * `InvalidArg`, if this `Device` is invalid or `fan_idx` is invalid
+    * `NotSupported`, if this `Device` does not have a fan
+    * `GpuLost`, if this `Device` has fallen off the bus or is otherwise inaccessible
+    * `UnexpectedVariant`, for which you can read the docs for
+    * `Unknown`, on any unexpected error
+
+    # Device Support
+
+    Supports Maxwell or newer fully supported discrete devices with fans.
+     */
+    #[doc(alias = "nvmlDeviceSetFanSpeed_v2")]
+    pub fn set_fan_speed(&mut self, fan_idx: u32, speed: u32) -> Result<(), NvmlError> {
+        let sym = nvml_sym(self.nvml.lib.nvmlDeviceSetFanSpeed_v2.as_ref())?;
+
+        unsafe { nvml_try(sym(self.device, fan_idx, speed)) }
+    }
+
+    /**
+    Sets the the fan control policy to default.
+
+    You can determine valid fan indices using [`Self::num_fans()`].
+
+    # Errors
+
+    * `Uninitialized`, if the library has not been successfully initialized
+    * `InvalidArg`, if this `Device` is invalid or `fan_idx` is invalid
+    * `NotSupported`, if this `Device` does not have a fan
+    * `GpuLost`, if this `Device` has fallen off the bus or is otherwise inaccessible
+    * `UnexpectedVariant`, for which you can read the docs for
+    * `Unknown`, on any unexpected error
+
+    # Device Support
+
+    Supports Maxwell or newer fully supported discrete devices with fans.
+     */
+    #[doc(alias = "nvmlDeviceSetDefaultFanSpeed_v2")]
+    pub fn set_default_fan_speed(&mut self, fan_idx: u32) -> Result<(), NvmlError> {
+        let sym = nvml_sym(self.nvml.lib.nvmlDeviceSetDefaultFanSpeed_v2.as_ref())?;
+
+        unsafe { nvml_try(sym(self.device, fan_idx)) }
     }
 
     /**
@@ -2101,7 +2442,7 @@ impl<'nvml> Device<'nvml> {
     * `Uninitialized`, if the library has not been successfully initialized
     * `InvalidArg`, if `error_type`, `counter_type`, or `location` is invalid (shouldn't occur?)
     * `NotSupported`, if this `Device` does not support ECC error reporting for the specified
-    memory
+    * memory
     * `GpuLost`, if this `Device` has fallen off the bus or is otherwise inaccessible
     * `Unknown`, on any unexpected error
 
@@ -2161,10 +2502,13 @@ impl<'nvml> Device<'nvml> {
     // Tested
     #[doc(alias = "nvmlDeviceGetMemoryInfo")]
     pub fn memory_info(&self) -> Result<MemoryInfo, NvmlError> {
-        let sym = nvml_sym(self.nvml.lib.nvmlDeviceGetMemoryInfo.as_ref())?;
+        let sym = nvml_sym(self.nvml.lib.nvmlDeviceGetMemoryInfo_v2.as_ref())?;
 
         unsafe {
-            let mut info: nvmlMemory_t = mem::zeroed();
+            let mut info: nvmlMemory_v2_t = mem::zeroed();
+
+            // Implements NVML_STRUCT_VERSION(Memory, 2), as detailed in nvml.h (https://github.com/NVIDIA/nvidia-settings/issues/78)
+            info.version = (std::mem::size_of::<nvmlMemory_v2_t>() | (2_usize << 24_usize)) as u32;
             nvml_try(sym(self.device, &mut info))?;
 
             Ok(info.into())
@@ -3023,7 +3367,7 @@ impl<'nvml> Device<'nvml> {
 
     * `Uninitialized`, if the library has not been successfully initialized
     * `IncorrectBits`, if NVML returns any bits that do not correspond to flags in
-    `ThrottleReasons`
+    * `ThrottleReasons`
     * `NotSupported`, if this `Device` does not support this feature
     * `GpuLost`, if this `Device` has fallen off the bus or is otherwise inaccessible
     * `Unknown`, on any unexpected error
@@ -3655,6 +3999,35 @@ impl<'nvml> Device<'nvml> {
     }
 
     /**
+    Gets the status for a given p2p capability index between this [`Device`] and another given [`Device`].
+
+    # Errors
+
+    * `Uninitialized`, if the library has not been successfully initialized
+    * `InvalidArg`, if device1 or device2 or p2p_index is invalid
+    * `Unknown`, on any unexpected error
+    */
+    #[doc(alias = "nvmlDeviceGetP2PStatus")]
+    pub fn p2p_status(
+        &self,
+        device2: &Device,
+        p2p_index: P2pCapabilitiesIndex,
+    ) -> Result<P2pStatus, NvmlError> {
+        let sym = nvml_sym(self.nvml.lib.nvmlDeviceGetP2PStatus.as_ref())?;
+
+        let status_c = unsafe {
+            let mut status: nvmlGpuP2PStatus_t = mem::zeroed();
+            let device2 = device2.device;
+
+            nvml_try(sym(self.device, device2, p2p_index as u32, &mut status))?;
+
+            status
+        };
+
+        P2pStatus::try_from(status_c)
+    }
+
+    /**
     Gets the power source of this [`Device`].
 
     # Errors
@@ -3950,6 +4323,58 @@ impl<'nvml> Device<'nvml> {
         let sym = nvml_sym(self.nvml.lib.nvmlDeviceSetCpuAffinity.as_ref())?;
 
         unsafe { nvml_try(sym(self.device)) }
+    }
+
+    /**
+    Gets a vector of bitmasks with the ideal CPU affinity for this `Device` within the specified `scope`,
+    the latter being NUMA node or processor socket (`NVML_AFFINITY_SCOPE_NODE` and `NVML_AFFINITY_SCOPE_SOCKET`).
+
+    Beyond this, the outcome and meaning are similar to `cpu_affinity`
+
+    # Errors
+
+    * `Uninitialized`, if the library has not been successfully initialized
+    * `InvalidArg`, if this `Device` is invalid
+    * `InsufficientSize`, if the passed-in `size` is 0 (must be > 0)
+    * `NotSupported`, if this `Device` does not support this feature
+    * `GpuLost`, if this `Device` has fallen off the bus or is otherwise inaccessible
+    * `Unknown`, on any unexpected error
+
+    # Device Support
+
+    Supports Kepler or newer fully supported devices.
+
+    # Platform Support
+
+    Only supports Linux.
+
+    */
+    #[cfg(target_os = "linux")]
+    #[doc(alias = "nvmlDeviceGetCpuAffinityWithinScope")]
+    pub fn cpu_affinity_within_scope(
+        &self,
+        size: usize,
+        scope: nvmlAffinityScope_t,
+    ) -> Result<Vec<c_ulong>, NvmlError> {
+        let sym = nvml_sym(self.nvml.lib.nvmlDeviceGetCpuAffinityWithinScope.as_ref())?;
+
+        unsafe {
+            if size == 0 {
+                // Return an error containing the minimum size that can be passed.
+                return Err(NvmlError::InsufficientSize(Some(1)));
+            }
+
+            let mut affinities: Vec<c_ulong> = vec![mem::zeroed(); size];
+
+            nvml_try(sym(
+                self.device,
+                size as c_uint,
+                affinities.as_mut_ptr(),
+                scope,
+            ))?;
+
+            Ok(affinities)
+        }
     }
 
     /**
@@ -5412,6 +5837,13 @@ mod test {
         test_with_device(3, &nvml, |device| device.cpu_affinity(64))
     }
 
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn cpu_affinity_within_scope() {
+        let nvml = nvml();
+        test_with_device(3, &nvml, |device| device.cpu_affinity_within_scope(64, 0))
+    }
+
     #[test]
     fn current_pcie_link_gen() {
         let nvml = nvml();
@@ -5521,6 +5953,12 @@ mod test {
     fn fan_speed() {
         let nvml = nvml();
         test_with_device(3, &nvml, |device| device.fan_speed(0))
+    }
+
+    #[test]
+    fn fan_speed_rpm() {
+        let nvml = nvml();
+        test_with_device(3, &nvml, |device| device.fan_speed_rpm(0))
     }
 
     #[test]
@@ -6276,5 +6714,12 @@ mod test {
     fn is_drain_enabled() {
         let nvml = nvml();
         test_with_device(3, &nvml, |device| device.is_drain_enabled(None))
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn device_attributes() {
+        let nvml = nvml();
+        test_with_device(3, &nvml, |device| device.attributes())
     }
 }
